@@ -22,7 +22,7 @@ EmbeddedRocksDBSink::EmbeddedRocksDBSink(
 {
     for (const auto & elem : getHeader())
     {
-        if (elem.name == storage.primary_key)
+        if (elem.name == storage.primary_key[0])
             break;
         ++primary_key_pos;
     }

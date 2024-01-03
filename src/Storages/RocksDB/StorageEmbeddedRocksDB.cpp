@@ -174,13 +174,13 @@ StorageEmbeddedRocksDB::StorageEmbeddedRocksDB(const StorageID & table_id_,
         const StorageInMemoryMetadata & metadata_,
         bool attach,
         ContextPtr context_,
-        const String & primary_key_,
+        const Names primary_key_,
         Int32 ttl_,
         String rocksdb_dir_,
         bool read_only_)
     : IStorage(table_id_)
     , WithContext(context_->getGlobalContext())
-    , primary_key{primary_key_}
+    , primary_key{std::move(primary_key_)}
     , rocksdb_dir(std::move(rocksdb_dir_))
     , ttl(ttl_)
     , read_only(read_only_)
@@ -251,7 +251,7 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
         auto sink = std::make_shared<EmbeddedRocksDBSink>(*this, metadata_snapshot);
 
         auto header = interpreter->getUpdatedHeader();
-        auto primary_key_pos = header.getPositionByName(primary_key);
+        auto primary_key_pos = header.getPositionByName(primary_key[0]);
 
         Block block;
         while (executor.pull(block))
@@ -282,8 +282,8 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
     }
 
     assert(commands.front().type == MutationCommand::Type::UPDATE);
-    if (commands.front().column_to_update_expression.contains(primary_key))
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Primary key cannot be updated (cannot update column {})", primary_key);
+    if (commands.front().column_to_update_expression.contains(primary_key[0]))
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Primary key cannot be updated (cannot update column {})", primary_key[0]);
 
     MutationsInterpreter::Settings settings(true);
     settings.return_all_columns = true;
@@ -585,8 +585,8 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
 void ReadFromEmbeddedRocksDB::applyFilters()
 {
     const auto & sample_block = getOutputStream().header;
-    auto primary_key_data_type = sample_block.getByName(storage.primary_key).type;
-    std::tie(keys, all_scan) = getFilterKeys(storage.primary_key, primary_key_data_type, filter_nodes, context);
+    auto primary_key_data_type = sample_block.getByName(storage.primary_key[0]).type;
+    std::tie(keys, all_scan) = getFilterKeys(storage.primary_key[0], primary_key_data_type, filter_nodes, context);
 }
 
 SinkToStoragePtr StorageEmbeddedRocksDB::write(
@@ -626,11 +626,10 @@ static StoragePtr create(const StorageFactory::Arguments & args)
 
     metadata.primary_key = KeyDescription::getKeyFromAST(args.storage_def->primary_key->ptr(), metadata.columns, args.getContext());
     auto primary_key_names = metadata.getColumnsRequiredForPrimaryKey();
-    if (primary_key_names.size() != 1)
-    {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "StorageEmbeddedRocksDB must require one column in primary key");
+    if (primary_key_names.empty()) {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "StorageEmbeddedRocksDB must require at least one column in primary key");
     }
-    return std::make_shared<StorageEmbeddedRocksDB>(args.table_id, args.relative_data_path, metadata, args.attach, args.getContext(), primary_key_names[0], ttl, std::move(rocksdb_dir), read_only);
+    return std::make_shared<StorageEmbeddedRocksDB>(args.table_id, args.relative_data_path, metadata, args.attach, args.getContext(), std::move(primary_key_names), ttl, std::move(rocksdb_dir), read_only);
 }
 
 std::shared_ptr<rocksdb::Statistics> StorageEmbeddedRocksDB::getRocksDBStatistics() const
