@@ -221,7 +221,6 @@ void StorageEmbeddedRocksDB::checkMutationIsPossible(const MutationCommands & co
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Only DELETE and UPDATE mutation supported for EmbeddedRocksDB");
 }
 
-// TODO: multipk
 void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPtr context_)
 {
     if (commands.empty())
@@ -295,8 +294,10 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
     }
 
     assert(commands.front().type == MutationCommand::Type::UPDATE);
-    if (commands.front().column_to_update_expression.contains(primary_key[0]))
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Primary key cannot be updated (cannot update column {})", primary_key[0]);
+    for (const auto& key : primary_key) {
+        if (commands.front().column_to_update_expression.contains(key))
+            throw Exception(ErrorCodes::BAD_ARGUMENTS, "Primary key cannot be updated (cannot update column {})", primary_key[0]);
+    }
 
     MutationsInterpreter::Settings settings(true);
     settings.return_all_columns = true;
