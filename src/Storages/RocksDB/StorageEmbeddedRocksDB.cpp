@@ -221,6 +221,7 @@ void StorageEmbeddedRocksDB::checkMutationIsPossible(const MutationCommands & co
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Only DELETE and UPDATE mutation supported for EmbeddedRocksDB");
 }
 
+// TODO: multipk
 void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPtr context_)
 {
     if (commands.empty())
@@ -251,23 +252,35 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
         auto sink = std::make_shared<EmbeddedRocksDBSink>(*this, metadata_snapshot);
 
         auto header = interpreter->getUpdatedHeader();
-        auto primary_key_pos = header.getPositionByName(primary_key[0]);
+        std::vector<size_t> primary_key_pos;
+        primary_key_pos.reserve(primary_key.size());
+        for (const auto& key_name : primary_key) {
+            primary_key_pos.push_back(header.getPositionByName(key_name));
+        }
 
         Block block;
         while (executor.pull(block))
         {
-            auto & column_type_name = block.getByPosition(primary_key_pos);
+            std::vector<ColumnPtr> columns;
+            std::vector<DataTypePtr> types;
+            columns.reserve(primary_key_pos.size());
+            types.reserve(primary_key_pos.size());
+            for (const auto pos : primary_key_pos) {
+                auto & column_type_name = block.getByPosition(pos);
+                columns.push_back(column_type_name.column);
+                types.push_back(column_type_name.type);
+            }
 
-            auto column = column_type_name.column;
-            auto size = column->size();
-
+            const auto size = block.rows();
             rocksdb::WriteBatch batch;
             WriteBufferFromOwnString wb_key;
             for (size_t i = 0; i < size; ++i)
             {
                 wb_key.restart();
 
-                column_type_name.type->getDefaultSerialization()->serializeBinary(*column, i, wb_key, {});
+                for (size_t j = 0; j < columns.size(); ++j) {
+                    types[j]->getDefaultSerialization()->serializeBinary(*columns[j], i, wb_key, {});
+                }
                 auto status = batch.Delete(wb_key.str());
                 if (!status.ok())
                     throw Exception(ErrorCodes::ROCKSDB_ERROR, "RocksDB write error: {}", status.ToString());
@@ -648,6 +661,7 @@ std::vector<rocksdb::Status> StorageEmbeddedRocksDB::multiGet(const std::vector<
     return rocksdb_ptr->MultiGet(rocksdb::ReadOptions(), slices_keys, &values);
 }
 
+// TODO: multipk
 Chunk StorageEmbeddedRocksDB::getByKeys(
     const ColumnsWithTypeAndName & keys,
     PaddedPODArray<UInt8> & null_map,
