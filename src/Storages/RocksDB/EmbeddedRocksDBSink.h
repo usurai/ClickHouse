@@ -23,8 +23,6 @@ public:
 private:
     StorageEmbeddedRocksDB & storage;
     StorageMetadataPtr metadata_snapshot;
-    std::vector<size_t> primary_key_pos;
-    std::vector<size_t> non_primay_key_pos;
     Serializations serializations;
 };
 

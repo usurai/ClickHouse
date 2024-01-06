@@ -97,8 +97,14 @@ public:
 
     std::optional<UInt64> totalBytes(const Settings & settings) const override;
 
+    const std::vector<size_t> getPrimaryKeyPos() const { return primary_key_pos; }
+
+    const std::vector<size_t> getValueColumnPos() const { return value_column_pos; }
+
 private:
     const Names primary_key;
+    std::vector<size_t> primary_key_pos;
+    std::vector<size_t> value_column_pos;
     using RocksDBPtr = std::unique_ptr<rocksdb::DB>;
     RocksDBPtr rocksdb_ptr;
     mutable SharedMutex rocksdb_ptr_mx;

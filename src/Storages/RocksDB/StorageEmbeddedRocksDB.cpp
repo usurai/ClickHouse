@@ -194,6 +194,21 @@ StorageEmbeddedRocksDB::StorageEmbeddedRocksDB(const StorageID & table_id_,
     {
         fs::create_directories(rocksdb_dir);
     }
+
+    auto sample_block = getInMemoryMetadataPtr()->getSampleBlock();
+    std::vector<bool> is_pk(sample_block.columns());
+    primary_key_pos.reserve(primary_key.size());
+    for (const auto& key_name : primary_key) {
+        primary_key_pos.push_back(sample_block.getPositionByName(key_name));
+        is_pk[primary_key_pos.back()] = true;
+    }
+
+    value_column_pos.reserve(is_pk.size() - primary_key_pos.size());
+    for (size_t i = 0; i < is_pk.size(); ++i) {
+        if (!is_pk[i])
+            value_column_pos.push_back(i);
+    }
+
     initDB();
 }
 
@@ -249,13 +264,6 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
         PullingPipelineExecutor executor(pipeline);
 
         auto sink = std::make_shared<EmbeddedRocksDBSink>(*this, metadata_snapshot);
-
-        auto header = interpreter->getUpdatedHeader();
-        std::vector<size_t> primary_key_pos;
-        primary_key_pos.reserve(primary_key.size());
-        for (const auto& key_name : primary_key) {
-            primary_key_pos.push_back(header.getPositionByName(key_name));
-        }
 
         Block block;
         while (executor.pull(block))
@@ -691,7 +699,7 @@ Chunk StorageEmbeddedRocksDB::getBySerializedKeys(
     std::vector<String> values;
     Block sample_block = getInMemoryMetadataPtr()->getSampleBlock();
 
-    size_t primary_key_pos = getPrimaryKeyPos(sample_block, getPrimaryKey());
+    size_t primary_key_pos_todo = ::DB::getPrimaryKeyPos(sample_block, getPrimaryKey());
 
     MutableColumns columns = sample_block.cloneEmptyColumns();
 
@@ -712,7 +720,7 @@ Chunk StorageEmbeddedRocksDB::getBySerializedKeys(
     {
         if (statuses[i].ok())
         {
-            fillColumns(slices_keys[i], values[i], primary_key_pos, sample_block, columns);
+            fillColumns(slices_keys[i], values[i], primary_key_pos_todo, sample_block, columns);
         }
         else if (statuses[i].IsNotFound())
         {
