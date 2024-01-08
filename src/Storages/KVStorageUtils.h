@@ -36,6 +36,16 @@ void fillColumns(const K & key, const V & value, size_t key_pos, const Block & h
     }
 }
 
+template <typename S>
+void fillColumns(const S & slice, const std::vector<size_t>& pos, const Block & header, MutableColumns & columns)
+{
+    ReadBufferFromString buffer(slice);
+    for (const auto col : pos) {
+        const auto & serialization = header.getByPosition(col).type->getDefaultSerialization();
+        serialization->deserializeBinary(*columns[col], buffer, {});
+    }
+}
+
 std::vector<std::string> serializeKeysToRawString(
     FieldVector::const_iterator & it,
     FieldVector::const_iterator end,

@@ -100,7 +100,6 @@ public:
         const size_t max_block_size_)
         : ISource(header)
         , storage(storage_)
-        , primary_key_pos(getPrimaryKeyPos(header, storage.getPrimaryKey()))
         , iterator(std::move(iterator_))
         , max_block_size(max_block_size_)
     {
@@ -139,7 +138,8 @@ public:
 
         for (size_t rows = 0; iterator->Valid() && rows < max_block_size; ++rows, iterator->Next())
         {
-            fillColumns(iterator->key(), iterator->value(), primary_key_pos, getPort().getHeader(), columns);
+            fillColumns(iterator->key(), storage.getPrimaryKeyPos(), getPort().getHeader(), columns);
+            fillColumns(iterator->value(), storage.getValueColumnPos(), getPort().getHeader(), columns);
         }
 
         if (!iterator->status().ok())
@@ -606,9 +606,13 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
 
 void ReadFromEmbeddedRocksDB::applyFilters()
 {
-    const auto & sample_block = getOutputStream().header;
-    auto primary_key_data_type = sample_block.getByName(storage.primary_key[0]).type;
-    std::tie(keys, all_scan) = getFilterKeys(storage.primary_key[0], primary_key_data_type, filter_nodes, context);
+    if (storage.primary_key.size() == 1) {
+        const auto & sample_block = getOutputStream().header;
+        auto primary_key_data_type = sample_block.getByName(storage.primary_key[0]).type;
+        std::tie(keys, all_scan) = getFilterKeys(storage.primary_key[0], primary_key_data_type, filter_nodes, context);
+    } else {
+        all_scan = true;
+    }
 }
 
 SinkToStoragePtr StorageEmbeddedRocksDB::write(
