@@ -531,7 +531,8 @@ private:
     size_t num_streams;
 
     FieldVectorPtr keys;
-    bool all_scan = false;
+    std::vector<FieldVectorPtr> keys_vec;
+    bool all_scan = true;
 };
 
 void StorageEmbeddedRocksDB::read(
@@ -606,13 +607,13 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
 
 void ReadFromEmbeddedRocksDB::applyFilters()
 {
-    if (storage.primary_key.size() == 1) {
-        const auto & sample_block = getOutputStream().header;
-        auto primary_key_data_type = sample_block.getByName(storage.primary_key[0]).type;
-        std::tie(keys, all_scan) = getFilterKeys(storage.primary_key[0], primary_key_data_type, filter_nodes, context);
-    } else {
-        all_scan = true;
+    const auto & sample_block = getOutputStream().header;
+    std::vector<DataTypePtr> types;
+    types.reserve(storage.primary_key.size());
+    for (size_t i = 0; i < storage.primary_key.size(); ++i) {
+        types.push_back(sample_block.getByName(storage.primary_key[i]).type);
     }
+    std::tie(keys_vec, all_scan) = getFilterKeys(storage.primary_key, types, filter_nodes, context);
 }
 
 SinkToStoragePtr StorageEmbeddedRocksDB::write(
