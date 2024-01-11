@@ -24,8 +24,8 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-struct MultiColumnKeyTuple {
-    explicit MultiColumnKeyTuple(size_t columns)
+struct MultiColumnKeySet {
+    explicit MultiColumnKeySet(size_t columns)
         : key_values(columns), intentional_empty(columns) {}
 
     size_t columns() const { return key_values.size(); }
@@ -41,7 +41,7 @@ struct MultiColumnKeyTuple {
     }
 
     // TODO: comment, like this would leave rhs as incomplete state
-    void intersectOrAdd(MultiColumnKeyTuple& rhs)
+    void intersectOrAdd(MultiColumnKeySet& rhs)
     {
         assert(rhs.columns() == columns());
         for (size_t i = 0; i < columns(); ++i)
@@ -190,7 +190,7 @@ bool traverseASTFilter(
 }
 
 bool traverseDAGFilter(
-    const std::unordered_map<std::string, size_t>& primary_key_pos, const std::vector<DataTypePtr>& primary_key_types, const ActionsDAG::Node * elem, const ContextPtr & context, MultiColumnKeyTuple & res) {
+    const std::unordered_map<std::string, size_t>& primary_key_pos, const std::vector<DataTypePtr>& primary_key_types, const ActionsDAG::Node * elem, const ContextPtr & context, MultiColumnKeySet & res) {
     if (elem->type == ActionsDAG::ActionType::ALIAS)
         return traverseDAGFilter(primary_key_pos, primary_key_types, elem->children.at(0), context, res);
 
@@ -205,7 +205,7 @@ bool traverseDAGFilter(
         bool found{false};
         for (const auto * child : elem->children)
         {
-            MultiColumnKeyTuple partial_res(primary_key_columns);
+            MultiColumnKeySet partial_res(primary_key_columns);
             if (!traverseDAGFilter(primary_key_pos, primary_key_types, child, context, partial_res))
                 continue;
             found = true;
@@ -217,7 +217,7 @@ bool traverseDAGFilter(
     {
         for (const auto * child : elem->children)
         {
-            MultiColumnKeyTuple partial_res(primary_key_columns);
+            MultiColumnKeySet partial_res(primary_key_columns);
             if (!traverseDAGFilter(primary_key_pos, primary_key_types, child, context, partial_res))
                 return false;
 
@@ -432,8 +432,9 @@ std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
         primary_key_pos[primary_key[i]] = i;
     }
 
-    MultiColumnKeyTuple res(primary_key.size());
+    MultiColumnKeySet res(primary_key.size());
     auto matched_keys = traverseDAGFilter(primary_key_pos, primary_key_types, predicate, context, res);
+
     std::cout << "keys:\n";
     for (auto & vec : res.key_values) {
         std::cout << vec.size() << ':';
@@ -443,6 +444,7 @@ std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
     }
     std::cout << '\n';
     std::cout << "all_scan:" << !matched_keys << '\n';
+
     // TODO: remove this
     matched_keys = false;
     return std::make_pair(std::vector<FieldVectorPtr>{}, !matched_keys);
