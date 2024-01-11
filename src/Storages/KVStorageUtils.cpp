@@ -24,6 +24,67 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
+struct MultiColumnKeyTuple {
+    explicit MultiColumnKeyTuple(size_t columns)
+        : key_values(columns), intentional_empty(columns) {}
+
+    size_t columns() const { return key_values.size(); }
+
+    size_t filled_columns() const {
+        size_t filled{0};
+        for (size_t i = 0; i < columns(); ++i)
+        {
+            if (!key_values[i].empty() || intentional_empty[i])
+                ++filled;
+        }
+        return filled;
+    }
+
+    // TODO: comment, like this would leave rhs as incomplete state
+    void intersectOrAdd(MultiColumnKeyTuple& rhs)
+    {
+        assert(rhs.columns() == columns());
+        for (size_t i = 0; i < columns(); ++i)
+        {
+            if (intentional_empty[i] || rhs.intentional_empty[i])
+            {
+                intentional_empty[i] = true;
+                continue;
+            }
+
+            if (rhs.key_values[i].empty())
+                continue;
+
+            auto & key_value = key_values[i];
+            if (key_value.empty()) {
+                key_value = std::move(rhs.key_values[i]);
+            } else if (!rhs.key_values[i].empty()) {
+                if (key_value.size() > rhs.key_values[i].size())
+                    std::swap(key_value, rhs.key_values[i]);
+                for (auto it = key_value.begin(); it != key_value.end();)
+                {
+                    if (!rhs.key_values[i].contains(*it))
+                        it = key_value.erase(it);
+                    else
+                        ++it;
+                }
+                if (key_value.empty())
+                    intentional_empty[i] = true;
+            }
+        }
+    }
+
+    void addField(size_t column, FieldSet& field_set)
+    {
+        for (auto & field : field_set)
+            key_values[column].insert(std::move(field));
+        intentional_empty[column] = false;
+    }
+
+    std::vector<FieldSet> key_values;
+    std::vector<bool> intentional_empty;
+};
+
 namespace
 {
 // returns keys may be filter by condition
@@ -128,17 +189,8 @@ bool traverseASTFilter(
     return false;
 }
 
-// TODO: combine different channel, intersect the same channel
-void combine(std::vector<FieldVectorPtr> & lhs, std::vector<FieldVectorPtr> & rhs)
-{
-    assert(lhs.size() == rhs.size());
-    for (size_t i = 0; i < lhs.size(); ++i)
-        for (size_t j = 0; j < rhs[i]->size(); ++j)
-            lhs[i]->push_back(std::move((*rhs[i])[j]));
-}
-
 bool traverseDAGFilter(
-    const std::unordered_map<std::string, size_t>& primary_key_pos, const std::vector<DataTypePtr>& primary_key_types, const ActionsDAG::Node * elem, const ContextPtr & context, std::vector<FieldVectorPtr> & res) {
+    const std::unordered_map<std::string, size_t>& primary_key_pos, const std::vector<DataTypePtr>& primary_key_types, const ActionsDAG::Node * elem, const ContextPtr & context, MultiColumnKeyTuple & res) {
     if (elem->type == ActionsDAG::ActionType::ALIAS)
         return traverseDAGFilter(primary_key_pos, primary_key_types, elem->children.at(0), context, res);
 
@@ -146,20 +198,18 @@ bool traverseDAGFilter(
         return false;
 
     auto func_name = elem->function_base->getName();
+    const auto primary_key_columns = primary_key_pos.size();
 
     if (func_name == "and")
     {
         bool found{false};
         for (const auto * child : elem->children)
         {
-            // TODO: consider to get rid of shared_ptr
-            std::vector<FieldVectorPtr> partial_res;
-            for (size_t i = 0; i < primary_key_pos.size(); ++i)
-                partial_res.push_back(std::make_shared<FieldVector>());
+            MultiColumnKeyTuple partial_res(primary_key_columns);
             if (!traverseDAGFilter(primary_key_pos, primary_key_types, child, context, partial_res))
                 continue;
             found = true;
-            combine(res, partial_res);
+            res.intersectOrAdd(partial_res);
         }
         return found;
     }
@@ -167,33 +217,21 @@ bool traverseDAGFilter(
     {
         for (const auto * child : elem->children)
         {
-            // TODO: consider to get rid of shared_ptr
-            std::vector<FieldVectorPtr> partial_res;
-            for (size_t i = 0; i < primary_key_pos.size(); ++i)
-                partial_res.push_back(std::make_shared<FieldVector>());
-
+            MultiColumnKeyTuple partial_res(primary_key_columns);
             if (!traverseDAGFilter(primary_key_pos, primary_key_types, child, context, partial_res))
                 return false;
 
-            auto count_columns = [](const std::vector<FieldVectorPtr>& vec) {
-                size_t columns{0};
-                for (const auto & vec_ptr : vec)
-                    columns += (vec_ptr->empty() ? 0 : 1);
-                return columns;
-            };
-
-            if (count_columns(partial_res) < primary_key_pos.size()) {
+            if (partial_res.filled_columns() < primary_key_columns) {
                 return false;
             }
 
-            if (count_columns(res)) {
-                // TODO: Support combining multiple OR.
-                if (primary_key_pos.size() > 1) {
+            if (res.filled_columns()) {
+                // TODO: elaborate. Support combining multiple OR.
+                if (primary_key_columns > 1) {
                     return false;
                 }
-                for (size_t i = 0; i < partial_res[0]->size(); ++i) {
-                    res[0]->push_back(std::move((*partial_res[0])[i]));
-                }
+                if (!partial_res.intentional_empty[0])
+                    res.addField(0, partial_res.key_values[0]);
             } else {
                 res = std::move(partial_res);
             }
@@ -247,7 +285,7 @@ bool traverseDAGFilter(
                 return false;
 
             for (size_t row = 0; row < set_column.size(); ++row)
-                res[pos]->push_back(set_column[row]);
+                res.key_values[pos].insert(set_column[row]);
             return true;
         }
         else
@@ -269,7 +307,7 @@ bool traverseDAGFilter(
             const auto pos = primary_key_pos.at(key->result_name);
             auto converted_field = convertFieldToType((*value->column)[0], *primary_key_types[pos]);
             if (!converted_field.isNull())
-                res[pos]->push_back(converted_field);
+                res.key_values[pos].insert(converted_field);
             return true;
         }
     }
@@ -379,6 +417,7 @@ bool traverseDAGFilter(
 }
 }
 
+
 std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
     const std::vector<String> & primary_key, const std::vector<DataTypePtr> & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context)
 {
@@ -393,24 +432,20 @@ std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
         primary_key_pos[primary_key[i]] = i;
     }
 
-    // TODO: set is better?
-    std::vector<FieldVectorPtr> res;
-    for (size_t i = 0; i < primary_key.size(); ++i)
-        res.push_back(std::make_shared<FieldVector>());
+    MultiColumnKeyTuple res(primary_key.size());
     auto matched_keys = traverseDAGFilter(primary_key_pos, primary_key_types, predicate, context, res);
-
-    std::cout << "keys size:\n";
-    for (auto & vec : res) {
-        std::cout << vec->size() << ':';
-        for (const auto & f : *vec)
+    std::cout << "keys:\n";
+    for (auto & vec : res.key_values) {
+        std::cout << vec.size() << ':';
+        for (const auto & f : vec)
             std::cout << toString(f) << ' ';
         std::cout << '\n';
     }
     std::cout << '\n';
     std::cout << "all_scan:" << !matched_keys << '\n';
-
-    // TODO: if not all the columns are filled, return no matched
-    return std::make_pair(res, !matched_keys);
+    // TODO: remove this
+    matched_keys = false;
+    return std::make_pair(std::vector<FieldVectorPtr>{}, !matched_keys);
 }
 
 std::pair<FieldVectorPtr, bool> getFilterKeys(

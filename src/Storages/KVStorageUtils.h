@@ -11,6 +11,7 @@ namespace DB
 {
 
 using FieldVectorPtr = std::shared_ptr<FieldVector>;
+using FieldSet= std::set<Field>;
 
 class IDataType;
 using DataTypePtr = std::shared_ptr<const IDataType>;
