@@ -528,10 +528,10 @@ private:
     ContextPtr context;
 
     size_t max_block_size;
-    size_t num_streams;
+    // TODO: Use this for all scan or key scan.
+    [[maybe_unused]] size_t num_streams;
 
-    FieldVectorPtr keys;
-    std::vector<FieldVectorPtr> keys_vec;
+    std::shared_ptr<std::vector<FieldVector>> keys_vec;
     bool all_scan = true;
 };
 
@@ -574,34 +574,22 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
     }
     else
     {
-        if (keys->empty())
+        if (keys_vec == nullptr)
         {
             pipeline.init(Pipe(std::make_shared<NullSource>(sample_block)));
             return;
         }
 
-        ::sort(keys->begin(), keys->end());
-        keys->erase(std::unique(keys->begin(), keys->end()), keys->end());
-
-        Pipes pipes;
-
-        size_t num_keys = keys->size();
-        size_t num_threads = std::min<size_t>(num_streams, keys->size());
-
-        assert(num_keys <= std::numeric_limits<uint32_t>::max());
-        assert(num_threads <= std::numeric_limits<uint32_t>::max());
-
-        for (size_t thread_idx = 0; thread_idx < num_threads; ++thread_idx)
+        std::vector<size_t> keys_indices(keys_vec->size());
+        size_t keys_to_process{1};
+        for (const auto & vec : *keys_vec)
         {
-            size_t begin = num_keys * thread_idx / num_threads;
-            size_t end = num_keys * (thread_idx + 1) / num_threads;
-
-            auto source = std::make_shared<EmbeddedRocksDBSource>(
-                    storage, sample_block, keys, keys->begin() + begin, keys->begin() + end, max_block_size);
-            source->setStorageLimits(query_info.storage_limits);
-            pipes.emplace_back(std::move(source));
+            keys_to_process *= vec.size();
         }
-        pipeline.init(Pipe::unitePipes(std::move(pipes)));
+            auto source = std::make_shared<EmbeddedRocksDBSource>(
+            storage, sample_block, keys_vec, keys_indices, keys_to_process, max_block_size);
+            source->setStorageLimits(query_info.storage_limits);
+        pipeline.init(Pipe(std::move(source)));
     }
 }
 
