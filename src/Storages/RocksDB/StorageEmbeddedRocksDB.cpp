@@ -78,17 +78,15 @@ public:
     EmbeddedRocksDBSource(
         const StorageEmbeddedRocksDB & storage_,
         const Block & header,
-        FieldVectorPtr keys_,
-        FieldVector::const_iterator begin_,
-        FieldVector::const_iterator end_,
+        std::shared_ptr<std::vector<FieldVector>> keys_,
+        std::vector<size_t> keys_indices_,
+        size_t keys_to_process,
         const size_t max_block_size_)
         : ISource(header)
         , storage(storage_)
-        , primary_key_pos(getPrimaryKeyPos(header, storage.getPrimaryKey()))
-        , keys(keys_)
-        , begin(begin_)
-        , end(end_)
-        , it(begin)
+        , keys_vec(keys_)
+        , keys_indices(std::move(keys_indices_))
+        , remaining(keys_to_process)
         , max_block_size(max_block_size_)
     {
     }
@@ -109,22 +107,27 @@ public:
 
     Chunk generate() override
     {
-        if (keys)
+        if (keys_vec)
             return generateWithKeys();
         return generateFullScan();
     }
 
     Chunk generateWithKeys()
     {
-        const auto & sample_block = getPort().getHeader();
-        if (it >= end)
-        {
-            it = {};
+        if (remaining == 0)
             return {};
+
+        const auto & sample_block = getPort().getHeader();
+        std::vector<DataTypePtr> types;
+        types.reserve(storage.getPrimaryKeyPos().size());
+        for (const auto pos : storage.getPrimaryKeyPos()) {
+            auto & column_type_name = sample_block.getByPosition(pos);
+            types.push_back(column_type_name.type);
         }
 
-        const auto & key_column_type = sample_block.getByName(storage.getPrimaryKey().at(0)).type;
-        auto raw_keys = serializeKeysToRawString(it, end, key_column_type, max_block_size);
+        auto raw_keys = serializeKeysToRawString(*keys_vec, keys_indices, types, std::min(remaining, max_block_size));
+        assert(raw_keys.size() <= remaining);
+        remaining -= raw_keys.size();
         return storage.getBySerializedKeys(raw_keys, nullptr);
     }
 
@@ -154,13 +157,10 @@ public:
 private:
     const StorageEmbeddedRocksDB & storage;
 
-    size_t primary_key_pos;
-
     /// For key scan
-    FieldVectorPtr keys = nullptr;
-    FieldVector::const_iterator begin;
-    FieldVector::const_iterator end;
-    FieldVector::const_iterator it;
+    std::shared_ptr<std::vector<FieldVector>> keys_vec;
+    std::vector<size_t> keys_indices;
+    size_t remaining = 0;
 
     /// For full scan
     std::unique_ptr<rocksdb::Iterator> iterator = nullptr;

@@ -22,7 +22,7 @@ using DataTypePtr = std::shared_ptr<const IDataType>;
 std::pair<FieldVectorPtr, bool> getFilterKeys(
     const std::string & primary_key, const DataTypePtr & primary_key_type, const SelectQueryInfo & query_info, const ContextPtr & context);
 
-std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
+std::pair<std::shared_ptr<std::vector<FieldVector>>, bool> getFilterKeys(
     const std::vector<String> & primary_key, const std::vector<DataTypePtr> & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context);
 
 template <typename K, typename V>
@@ -46,6 +46,12 @@ void fillColumns(const S & slice, const std::vector<size_t>& pos, const Block & 
         serialization->deserializeBinary(*columns[col], buffer, {});
     }
 }
+
+std::vector<std::string> serializeKeysToRawString(
+    const std::vector<FieldVector> & keys,
+    std::vector<size_t> & key_indices,
+    const std::vector<DataTypePtr>& key_column_types,
+    size_t limit);
 
 std::vector<std::string> serializeKeysToRawString(
     FieldVector::const_iterator & it,

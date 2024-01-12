@@ -418,7 +418,8 @@ bool traverseDAGFilter(
 }
 
 
-std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
+// TODO: Comment on return value.
+std::pair<std::shared_ptr<std::vector<FieldVector>>, bool> getFilterKeys(
     const std::vector<String> & primary_key, const std::vector<DataTypePtr> & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context)
 {
     if (filter_nodes.nodes.empty())
@@ -435,6 +436,7 @@ std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
     MultiColumnKeySet res(primary_key.size());
     auto matched_keys = traverseDAGFilter(primary_key_pos, primary_key_types, predicate, context, res);
 
+    // TODO: Remove this.
     std::cout << "keys:\n";
     for (auto & vec : res.key_values) {
         std::cout << vec.size() << ':';
@@ -445,9 +447,22 @@ std::pair<std::vector<FieldVectorPtr>, bool> getFilterKeys(
     std::cout << '\n';
     std::cout << "all_scan:" << !matched_keys << '\n';
 
-    // TODO: remove this
-    matched_keys = false;
-    return std::make_pair(std::vector<FieldVectorPtr>{}, !matched_keys);
+    if (!matched_keys)
+        return {nullptr, true};
+
+    for (size_t i = 0; i < primary_key.size(); ++i)
+    {
+        if (res.intentional_empty[i])
+            return {nullptr, true};
+        if (res.key_values[i].empty())
+            return {nullptr, false};
+    }
+    auto keys_vec = std::make_shared<std::vector<FieldVector>>();
+    keys_vec->reserve(primary_key.size());
+    for (auto & key_value : res.key_values)
+        keys_vec->emplace_back(key_value.begin(), key_value.end());
+
+    return {keys_vec, false};
 }
 
 std::pair<FieldVectorPtr, bool> getFilterKeys(
@@ -460,6 +475,54 @@ std::pair<FieldVectorPtr, bool> getFilterKeys(
     FieldVectorPtr res = std::make_shared<FieldVector>();
     auto matched_keys = traverseASTFilter(primary_key, primary_key_type, select.where(), query_info.prepared_sets, context, res);
     return std::make_pair(res, !matched_keys);
+}
+
+void advanceIndices(
+    const std::vector<FieldVector> & keys,
+    std::vector<size_t> & key_indices)
+{
+    for (size_t i = keys.size() - 1; ; --i)
+    {
+        assert(key_indices[i] < keys[i].size());
+        ++key_indices[i];
+        if (key_indices[i] < keys[i].size())
+            return;
+        if (i == 0)
+            return;
+        key_indices[i] = 0;
+    }
+}
+
+bool indicesAtEnd(
+    const std::vector<FieldVector> & keys,
+    const std::vector<size_t> & key_indices)
+{
+    return key_indices[0] == keys[0].size();
+}
+
+std::vector<std::string> serializeKeysToRawString(
+    const std::vector<FieldVector> & keys,
+    std::vector<size_t> & key_indices,
+    const std::vector<DataTypePtr>& key_column_types,
+    size_t limit)
+{
+    std::vector<std::string> result;
+    size_t rows_processed = 0;
+    while (rows_processed < limit)
+    {
+        assert(!indicesAtEnd(keys, key_indices));
+        std::string & serialized_key = result.emplace_back();
+        WriteBufferFromString wb(serialized_key);
+        for (size_t i = 0; i < keys.size(); ++i)
+        {
+            key_column_types[i]->getDefaultSerialization()->serializeBinary(keys[i].at(key_indices[i]), wb, {});
+        }
+        wb.finalize();
+
+        advanceIndices(keys, key_indices);
+        ++rows_processed;
+    }
+    return result;
 }
 
 std::vector<std::string> serializeKeysToRawString(
