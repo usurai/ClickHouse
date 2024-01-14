@@ -586,9 +586,9 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
         {
             keys_to_process *= vec.size();
         }
-            auto source = std::make_shared<EmbeddedRocksDBSource>(
+        auto source = std::make_shared<EmbeddedRocksDBSource>(
             storage, sample_block, keys_vec, keys_indices, keys_to_process, max_block_size);
-            source->setStorageLimits(query_info.storage_limits);
+        source->setStorageLimits(query_info.storage_limits);
         pipeline.init(Pipe(std::move(source)));
     }
 }
@@ -692,8 +692,6 @@ Chunk StorageEmbeddedRocksDB::getBySerializedKeys(
     std::vector<String> values;
     Block sample_block = getInMemoryMetadataPtr()->getSampleBlock();
 
-    size_t primary_key_pos_todo = ::DB::getPrimaryKeyPos(sample_block, getPrimaryKey());
-
     MutableColumns columns = sample_block.cloneEmptyColumns();
 
     /// Convert from vector of string to vector of string refs (rocksdb::Slice), because multiGet api expects them.
@@ -713,7 +711,8 @@ Chunk StorageEmbeddedRocksDB::getBySerializedKeys(
     {
         if (statuses[i].ok())
         {
-            fillColumns(slices_keys[i], values[i], primary_key_pos_todo, sample_block, columns);
+            fillColumns(slices_keys[i], getPrimaryKeyPos(), sample_block, columns);
+            fillColumns(values[i], getValueColumnPos(), sample_block, columns);
         }
         else if (statuses[i].IsNotFound())
         {
