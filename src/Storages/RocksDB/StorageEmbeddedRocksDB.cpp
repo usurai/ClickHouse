@@ -72,7 +72,7 @@ static RocksDBOptions getOptionsFromConfig(const Poco::Util::AbstractConfigurati
     return options;
 }
 
-// TODO: Rename added variables, like keys_indices
+// TODO: encapsulate keys and keys_indices
 class EmbeddedRocksDBSource : public ISource
 {
 public:
@@ -81,13 +81,13 @@ public:
         const Block & header,
         std::shared_ptr<std::vector<FieldVector>> keys_,
         std::vector<size_t> keys_indices_,
-        size_t keys_to_process,
+        size_t keys_to_process_,
         const size_t max_block_size_)
         : ISource(header)
         , storage(storage_)
         , keys_vec(keys_)
         , keys_indices(std::move(keys_indices_))
-        , remaining(keys_to_process)
+        , keys_to_process(keys_to_process_)
         , max_block_size(max_block_size_)
     {
     }
@@ -115,21 +115,11 @@ public:
 
     Chunk generateWithKeys()
     {
-        if (remaining == 0)
+        if (keys_to_process == 0)
             return {};
-
-        const auto & sample_block = getPort().getHeader();
-        // TODO: cache this.
-        std::vector<DataTypePtr> types;
-        types.reserve(storage.getPrimaryKeyPos().size());
-        for (const auto pos : storage.getPrimaryKeyPos()) {
-            auto & column_type_name = sample_block.getByPosition(pos);
-            types.push_back(column_type_name.type);
-        }
-
-        auto raw_keys = serializeKeysToRawString(*keys_vec, keys_indices, types, std::min(remaining, max_block_size));
-        assert(raw_keys.size() <= remaining);
-        remaining -= raw_keys.size();
+        auto raw_keys = serializeKeysToRawString(*keys_vec, keys_indices, storage.getPrimaryKeyTypes(), std::min(keys_to_process, max_block_size));
+        assert(raw_keys.size() <= keys_to_process);
+        keys_to_process -= raw_keys.size();
         return storage.getBySerializedKeys(raw_keys, nullptr);
     }
 
@@ -162,7 +152,7 @@ private:
     /// For key scan
     std::shared_ptr<std::vector<FieldVector>> keys_vec;
     std::vector<size_t> keys_indices;
-    size_t remaining = 0;
+    size_t keys_to_process = 0;
 
     /// For full scan
     std::unique_ptr<rocksdb::Iterator> iterator = nullptr;
@@ -197,7 +187,7 @@ StorageEmbeddedRocksDB::StorageEmbeddedRocksDB(const StorageID & table_id_,
         fs::create_directories(rocksdb_dir);
     }
 
-    auto sample_block = getInMemoryMetadataPtr()->getSampleBlock();
+    const auto sample_block = getInMemoryMetadataPtr()->getSampleBlock();
     std::vector<bool> is_pk(sample_block.columns());
     primary_key_pos.reserve(primary_key.size());
     for (const auto& key_name : primary_key) {
@@ -209,6 +199,12 @@ StorageEmbeddedRocksDB::StorageEmbeddedRocksDB(const StorageID & table_id_,
     for (size_t i = 0; i < is_pk.size(); ++i) {
         if (!is_pk[i])
             value_column_pos.push_back(i);
+    }
+
+    primary_key_types.reserve(primary_key.size());
+    for (const auto pos : primary_key_pos) {
+        auto & column_type_name = sample_block.getByPosition(pos);
+        primary_key_types.push_back(column_type_name.type);
     }
 
     initDB();
@@ -533,8 +529,7 @@ private:
     // TODO: Use this for all scan or key scan.
     [[maybe_unused]] size_t num_streams;
 
-    // TODO: Rename
-    std::shared_ptr<std::vector<FieldVector>> keys_vec;
+    FieldVectorsPtr key_values;
     bool all_scan = true;
 };
 
@@ -577,21 +572,21 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
     }
     else
     {
-        if (keys_vec == nullptr)
+        if (key_values == nullptr)
         {
             pipeline.init(Pipe(std::make_shared<NullSource>(sample_block)));
             return;
         }
 
-        std::vector<size_t> keys_indices(keys_vec->size());
+        std::vector<size_t> keys_indices(key_values->size());
         size_t keys_to_process{1};
-        for (const auto & vec : *keys_vec)
+        for (const auto & vec : *key_values)
         {
             keys_to_process *= vec.size();
         }
         // TODO: Justify why change to use single thread.
         auto source = std::make_shared<EmbeddedRocksDBSource>(
-            storage, sample_block, keys_vec, keys_indices, keys_to_process, max_block_size);
+            storage, sample_block, key_values, keys_indices, keys_to_process, max_block_size);
         source->setStorageLimits(query_info.storage_limits);
         pipeline.init(Pipe(std::move(source)));
     }
@@ -602,11 +597,9 @@ void ReadFromEmbeddedRocksDB::applyFilters()
     const auto & sample_block = getOutputStream().header;
     std::vector<DataTypePtr> types;
     types.reserve(storage.primary_key.size());
-    // TODO: No bracket
-    for (size_t i = 0; i < storage.primary_key.size(); ++i) {
+    for (size_t i = 0; i < storage.primary_key.size(); ++i)
         types.push_back(sample_block.getByName(storage.primary_key[i]).type);
-    }
-    std::tie(keys_vec, all_scan) = getFilterKeys(storage.primary_key, types, filter_nodes, context);
+    std::tie(key_values, all_scan) = getFilterKeys(storage.primary_key, types, filter_nodes, context);
 }
 
 SinkToStoragePtr StorageEmbeddedRocksDB::write(

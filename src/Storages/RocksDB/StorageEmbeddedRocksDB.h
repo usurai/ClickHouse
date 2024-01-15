@@ -97,16 +97,23 @@ public:
 
     std::optional<UInt64> totalBytes(const Settings & settings) const override;
 
-    // TODO: comment
+    /// Returns the column indices of primary key.
     const std::vector<size_t> getPrimaryKeyPos() const { return primary_key_pos; }
 
-    // TODO: ditto
+    /// Returns the column indices of non primary key columns.
     const std::vector<size_t> getValueColumnPos() const { return value_column_pos; }
+
+    /// Returns types of primary key columns.
+    const DataTypes & getPrimaryKeyTypes() const
+    {
+        return primary_key_types;
+    }
 
 private:
     const Names primary_key;
     std::vector<size_t> primary_key_pos;
     std::vector<size_t> value_column_pos;
+    DataTypes primary_key_types;
     using RocksDBPtr = std::unique_ptr<rocksdb::DB>;
     RocksDBPtr rocksdb_ptr;
     mutable SharedMutex rocksdb_ptr_mx;

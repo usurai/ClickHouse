@@ -11,8 +11,7 @@ namespace DB
 {
 
 using FieldVectorPtr = std::shared_ptr<FieldVector>;
-using FieldSet= std::set<Field>;
-// TODO: FieldVectorsPtr = std::shared_ptr<std::vector<FieldVector>>;
+using FieldVectorsPtr = std::shared_ptr<std::vector<FieldVector>>;
 
 class IDataType;
 using DataTypePtr = std::shared_ptr<const IDataType>;
@@ -23,9 +22,11 @@ using DataTypePtr = std::shared_ptr<const IDataType>;
 std::pair<FieldVectorPtr, bool> getFilterKeys(
     const std::string & primary_key, const DataTypePtr & primary_key_type, const SelectQueryInfo & query_info, const ContextPtr & context);
 
-// TODO: elaborate return values
-std::pair<std::shared_ptr<std::vector<FieldVector>>, bool> getFilterKeys(
-    const std::vector<String> & primary_key, const std::vector<DataTypePtr> & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context);
+/** Multi-column primary key version.
+ * TODO: Elaborate
+ */
+std::pair<FieldVectorsPtr, bool> getFilterKeys(
+    const Names & primary_key, const DataTypes & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context);
 
 template <typename K, typename V>
 void fillColumns(const K & key, const V & value, size_t key_pos, const Block & header, MutableColumns & columns)
@@ -40,7 +41,7 @@ void fillColumns(const K & key, const V & value, size_t key_pos, const Block & h
 }
 
 template <typename S>
-void fillColumns(const S & slice, const std::vector<size_t>& pos, const Block & header, MutableColumns & columns)
+void fillColumns(const S & slice, const std::vector<size_t> & pos, const Block & header, MutableColumns & columns)
 {
     ReadBufferFromString buffer(slice);
     for (const auto col : pos) {
@@ -49,6 +50,7 @@ void fillColumns(const S & slice, const std::vector<size_t>& pos, const Block & 
     }
 }
 
+// TODO: comment
 std::vector<std::string> serializeKeysToRawString(
     const std::vector<FieldVector> & keys,
     std::vector<size_t> & key_indices,

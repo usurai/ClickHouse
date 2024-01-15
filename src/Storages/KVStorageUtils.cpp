@@ -19,6 +19,8 @@
 namespace DB
 {
 
+using FieldSet = std::set<Field>;
+
 namespace ErrorCodes
 {
     extern const int LOGICAL_ERROR;
@@ -26,7 +28,7 @@ namespace ErrorCodes
 
 struct MultiColumnKeySet {
     explicit MultiColumnKeySet(size_t columns)
-        : key_values(columns), intentional_empty(columns) {}
+        : key_values(columns), explicit_empty(columns) {}
 
     size_t columns() const { return key_values.size(); }
 
@@ -34,7 +36,7 @@ struct MultiColumnKeySet {
         size_t filled{0};
         for (size_t i = 0; i < columns(); ++i)
         {
-            if (!key_values[i].empty() || intentional_empty[i])
+            if (!key_values[i].empty() || explicit_empty[i])
                 ++filled;
         }
         return filled;
@@ -46,9 +48,9 @@ struct MultiColumnKeySet {
         assert(rhs.columns() == columns());
         for (size_t i = 0; i < columns(); ++i)
         {
-            if (intentional_empty[i] || rhs.intentional_empty[i])
+            if (explicit_empty[i] || rhs.explicit_empty[i])
             {
-                intentional_empty[i] = true;
+                explicit_empty[i] = true;
                 continue;
             }
 
@@ -69,7 +71,7 @@ struct MultiColumnKeySet {
                         ++it;
                 }
                 if (key_value.empty())
-                    intentional_empty[i] = true;
+                    explicit_empty[i] = true;
             }
         }
     }
@@ -78,11 +80,12 @@ struct MultiColumnKeySet {
     {
         for (auto & field : field_set)
             key_values[column].insert(std::move(field));
-        intentional_empty[column] = false;
+        explicit_empty[column] = false;
     }
 
     std::vector<FieldSet> key_values;
-    std::vector<bool> intentional_empty;
+    // Identifies if the key is explicitly set empty by WHERE clause, like 'WHERE key = 1 AND key in (4, 5)'.
+    std::vector<bool> explicit_empty;
 };
 
 namespace
@@ -230,7 +233,7 @@ bool traverseDAGFilter(
                 if (primary_key_columns > 1) {
                     return false;
                 }
-                if (!partial_res.intentional_empty[0])
+                if (!partial_res.explicit_empty[0])
                     res.addField(0, partial_res.key_values[0]);
             } else {
                 res = std::move(partial_res);
@@ -418,28 +421,23 @@ bool traverseDAGFilter(
 }
 
 
-// TODO: Comment on return value.
-// TODO: vec<String> -> Names
-std::pair<std::shared_ptr<std::vector<FieldVector>>, bool> getFilterKeys(
-    const std::vector<String> & primary_key, const std::vector<DataTypePtr> & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context)
+std::pair<FieldVectorsPtr, bool> getFilterKeys(
+    const Names & primary_key, const DataTypes & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context)
 {
-    // TODO: return nullptr
     if (filter_nodes.nodes.empty())
-        return {{}, true};
+        return {nullptr, true};
 
     auto filter_actions_dag = ActionsDAG::buildFilterActionsDAG(filter_nodes.nodes);
     const auto * predicate = filter_actions_dag->getOutputs().at(0);
 
-    // TODO: bracket
     std::unordered_map<String, size_t> primary_key_pos;
-    for (size_t i = 0; i < primary_key.size(); ++i) {
+    for (size_t i = 0; i < primary_key.size(); ++i)
         primary_key_pos[primary_key[i]] = i;
-    }
 
     MultiColumnKeySet res(primary_key.size());
     auto matched_keys = traverseDAGFilter(primary_key_pos, primary_key_types, predicate, context, res);
 
-    // TODO: Remove this.
+    // TODO: Remove this after tests.
     std::cout << "keys:\n";
     for (auto & vec : res.key_values) {
         std::cout << vec.size() << ':';
@@ -455,17 +453,17 @@ std::pair<std::shared_ptr<std::vector<FieldVector>>, bool> getFilterKeys(
 
     for (size_t i = 0; i < primary_key.size(); ++i)
     {
-        if (res.intentional_empty[i])
+        if (res.explicit_empty[i])
             return {nullptr, true};
         if (res.key_values[i].empty())
             return {nullptr, false};
     }
-    auto keys_vec = std::make_shared<std::vector<FieldVector>>();
-    keys_vec->reserve(primary_key.size());
+    auto key_values = std::make_shared<std::vector<FieldVector>>();
+    key_values->reserve(primary_key.size());
     for (auto & key_value : res.key_values)
-        keys_vec->emplace_back(key_value.begin(), key_value.end());
+        key_values->emplace_back(key_value.begin(), key_value.end());
 
-    return {keys_vec, false};
+    return {key_values, false};
 }
 
 std::pair<FieldVectorPtr, bool> getFilterKeys(
