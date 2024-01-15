@@ -72,6 +72,7 @@ static RocksDBOptions getOptionsFromConfig(const Poco::Util::AbstractConfigurati
     return options;
 }
 
+// TODO: Rename added variables, like keys_indices
 class EmbeddedRocksDBSource : public ISource
 {
 public:
@@ -118,6 +119,7 @@ public:
             return {};
 
         const auto & sample_block = getPort().getHeader();
+        // TODO: cache this.
         std::vector<DataTypePtr> types;
         types.reserve(storage.getPrimaryKeyPos().size());
         for (const auto pos : storage.getPrimaryKeyPos()) {
@@ -531,6 +533,7 @@ private:
     // TODO: Use this for all scan or key scan.
     [[maybe_unused]] size_t num_streams;
 
+    // TODO: Rename
     std::shared_ptr<std::vector<FieldVector>> keys_vec;
     bool all_scan = true;
 };
@@ -586,6 +589,7 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
         {
             keys_to_process *= vec.size();
         }
+        // TODO: Justify why change to use single thread.
         auto source = std::make_shared<EmbeddedRocksDBSource>(
             storage, sample_block, keys_vec, keys_indices, keys_to_process, max_block_size);
         source->setStorageLimits(query_info.storage_limits);
@@ -598,6 +602,7 @@ void ReadFromEmbeddedRocksDB::applyFilters()
     const auto & sample_block = getOutputStream().header;
     std::vector<DataTypePtr> types;
     types.reserve(storage.primary_key.size());
+    // TODO: No bracket
     for (size_t i = 0; i < storage.primary_key.size(); ++i) {
         types.push_back(sample_block.getByName(storage.primary_key[i]).type);
     }
@@ -663,7 +668,7 @@ std::vector<rocksdb::Status> StorageEmbeddedRocksDB::multiGet(const std::vector<
     return rocksdb_ptr->MultiGet(rocksdb::ReadOptions(), slices_keys, &values);
 }
 
-// TODO: multipk
+// TODO: multi-col pk
 Chunk StorageEmbeddedRocksDB::getByKeys(
     const ColumnsWithTypeAndName & keys,
     PaddedPODArray<UInt8> & null_map,

@@ -419,15 +419,18 @@ bool traverseDAGFilter(
 
 
 // TODO: Comment on return value.
+// TODO: vec<String> -> Names
 std::pair<std::shared_ptr<std::vector<FieldVector>>, bool> getFilterKeys(
     const std::vector<String> & primary_key, const std::vector<DataTypePtr> & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context)
 {
+    // TODO: return nullptr
     if (filter_nodes.nodes.empty())
         return {{}, true};
 
     auto filter_actions_dag = ActionsDAG::buildFilterActionsDAG(filter_nodes.nodes);
     const auto * predicate = filter_actions_dag->getOutputs().at(0);
 
+    // TODO: bracket
     std::unordered_map<String, size_t> primary_key_pos;
     for (size_t i = 0; i < primary_key.size(); ++i) {
         primary_key_pos[primary_key[i]] = i;
@@ -477,6 +480,7 @@ std::pair<FieldVectorPtr, bool> getFilterKeys(
     return std::make_pair(res, !matched_keys);
 }
 
+// TODO: Consider encapsulate keys and indices
 void advanceIndices(
     const std::vector<FieldVector> & keys,
     std::vector<size_t> & key_indices)

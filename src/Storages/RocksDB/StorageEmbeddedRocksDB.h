@@ -97,8 +97,10 @@ public:
 
     std::optional<UInt64> totalBytes(const Settings & settings) const override;
 
+    // TODO: comment
     const std::vector<size_t> getPrimaryKeyPos() const { return primary_key_pos; }
 
+    // TODO: ditto
     const std::vector<size_t> getValueColumnPos() const { return value_column_pos; }
 
 private:

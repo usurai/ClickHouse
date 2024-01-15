@@ -12,6 +12,7 @@ namespace DB
 
 using FieldVectorPtr = std::shared_ptr<FieldVector>;
 using FieldSet= std::set<Field>;
+// TODO: FieldVectorsPtr = std::shared_ptr<std::vector<FieldVector>>;
 
 class IDataType;
 using DataTypePtr = std::shared_ptr<const IDataType>;
@@ -22,6 +23,7 @@ using DataTypePtr = std::shared_ptr<const IDataType>;
 std::pair<FieldVectorPtr, bool> getFilterKeys(
     const std::string & primary_key, const DataTypePtr & primary_key_type, const SelectQueryInfo & query_info, const ContextPtr & context);
 
+// TODO: elaborate return values
 std::pair<std::shared_ptr<std::vector<FieldVector>>, bool> getFilterKeys(
     const std::vector<String> & primary_key, const std::vector<DataTypePtr> & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context);
 
