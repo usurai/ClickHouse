@@ -16,6 +16,61 @@ using FieldVectorsPtr = std::shared_ptr<std::vector<FieldVector>>;
 class IDataType;
 using DataTypePtr = std::shared_ptr<const IDataType>;
 
+// TODO: comment & move to .cpp
+class KeyIterator {
+public:
+    KeyIterator() = delete;
+
+    KeyIterator(FieldVectorsPtr keys_, size_t begin = 0, size_t keys_to_process = 0)
+        : keys{keys_}
+    , key_value_indices(keys->size())
+    , keys_remaining(keys_to_process)
+    {
+        std::vector<size_t> size_products(columns(), 1);
+        for (int32_t i = static_cast<int32_t>(keys->size()) - 2; i >= 0; --i)
+            size_products[i] = size_products[i + 1] * keys->at(i + 1).size();
+        const auto total_keys = size_products[0] * keys->at(0).size();
+        if (keys_remaining == 0)
+            keys_remaining = total_keys - begin;
+        assert(begin + keys_to_process < total_keys);
+        for (size_t i = 0; i < columns(); ++i)
+        {
+            key_value_indices[i] = begin / size_products[i];
+            begin -= key_value_indices[i] * size_products[i];
+        }
+    }
+
+    size_t columns() const { return keys->size(); }
+
+    const Field & keyValueAt(size_t column) const
+    {
+        assert(column < columns());
+        assert(!atEnd());
+        return keys->at(column)[key_value_indices[column]];
+    }
+
+    void advance()
+    {
+        assert(!atEnd());
+        for (size_t i = columns() - 1; ; --i)
+        {
+            ++key_value_indices[i];
+            if (key_value_indices[i] < keys->at(i).size())
+                return;
+            if (i == 0)
+                return;
+            key_value_indices[i] = 0;
+        }
+    }
+
+    bool atEnd() const { return key_value_indices[0] == keys->at(0).size(); }
+
+private:
+    FieldVectorsPtr keys;
+    std::vector<size_t> key_value_indices;
+    size_t keys_remaining;
+};
+
 /** Retrieve from the query a condition of the form `key = 'key'`, `key in ('xxx_'), from conjunctions in the WHERE clause.
   * TODO support key like search
   */
@@ -52,10 +107,9 @@ void fillColumns(const S & slice, const std::vector<size_t> & pos, const Block &
 
 // TODO: comment
 std::vector<std::string> serializeKeysToRawString(
-    const std::vector<FieldVector> & keys,
-    std::vector<size_t> & key_indices,
-    const std::vector<DataTypePtr>& key_column_types,
-    size_t limit);
+    KeyIterator& key_iterator,
+    const DataTypes & key_column_types,
+    size_t max_block_size);
 
 std::vector<std::string> serializeKeysToRawString(
     FieldVector::const_iterator & it,

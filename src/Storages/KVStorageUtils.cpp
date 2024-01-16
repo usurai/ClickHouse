@@ -503,26 +503,19 @@ bool indicesAtEnd(
 }
 
 std::vector<std::string> serializeKeysToRawString(
-    const std::vector<FieldVector> & keys,
-    std::vector<size_t> & key_indices,
-    const std::vector<DataTypePtr>& key_column_types,
-    size_t limit)
+    KeyIterator& key_iterator,
+    const DataTypes & key_column_types,
+    size_t max_block_size)
 {
     std::vector<std::string> result;
-    size_t rows_processed = 0;
-    while (rows_processed < limit)
+    while (!key_iterator.atEnd() && result.size() < max_block_size)
     {
-        assert(!indicesAtEnd(keys, key_indices));
         std::string & serialized_key = result.emplace_back();
         WriteBufferFromString wb(serialized_key);
-        for (size_t i = 0; i < keys.size(); ++i)
-        {
-            key_column_types[i]->getDefaultSerialization()->serializeBinary(keys[i].at(key_indices[i]), wb, {});
-        }
+        for (size_t i = 0; i < key_iterator.columns(); ++i)
+            key_column_types[i]->getDefaultSerialization()->serializeBinary(key_iterator.keyValueAt(i), wb, {});
         wb.finalize();
-
-        advanceIndices(keys, key_indices);
-        ++rows_processed;
+        key_iterator.advance();
     }
     return result;
 }

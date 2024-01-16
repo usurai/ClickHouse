@@ -79,15 +79,11 @@ public:
     EmbeddedRocksDBSource(
         const StorageEmbeddedRocksDB & storage_,
         const Block & header,
-        std::shared_ptr<std::vector<FieldVector>> keys_,
-        std::vector<size_t> keys_indices_,
-        size_t keys_to_process_,
+        KeyIterator key_iterator_,
         const size_t max_block_size_)
         : ISource(header)
         , storage(storage_)
-        , keys_vec(keys_)
-        , keys_indices(std::move(keys_indices_))
-        , keys_to_process(keys_to_process_)
+        , key_iterator(std::move(key_iterator_))
         , max_block_size(max_block_size_)
     {
     }
@@ -108,18 +104,16 @@ public:
 
     Chunk generate() override
     {
-        if (keys_vec)
+        if (key_iterator.has_value())
             return generateWithKeys();
         return generateFullScan();
     }
 
     Chunk generateWithKeys()
     {
-        if (keys_to_process == 0)
+        if (key_iterator.value().atEnd())
             return {};
-        auto raw_keys = serializeKeysToRawString(*keys_vec, keys_indices, storage.getPrimaryKeyTypes(), std::min(keys_to_process, max_block_size));
-        assert(raw_keys.size() <= keys_to_process);
-        keys_to_process -= raw_keys.size();
+        auto raw_keys = serializeKeysToRawString(key_iterator.value(), storage.getPrimaryKeyTypes(), max_block_size);
         return storage.getBySerializedKeys(raw_keys, nullptr);
     }
 
@@ -150,9 +144,7 @@ private:
     const StorageEmbeddedRocksDB & storage;
 
     /// For key scan
-    std::shared_ptr<std::vector<FieldVector>> keys_vec;
-    std::vector<size_t> keys_indices;
-    size_t keys_to_process = 0;
+    std::optional<KeyIterator> key_iterator{std::nullopt};
 
     /// For full scan
     std::unique_ptr<rocksdb::Iterator> iterator = nullptr;
@@ -578,15 +570,9 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
             return;
         }
 
-        std::vector<size_t> keys_indices(key_values->size());
-        size_t keys_to_process{1};
-        for (const auto & vec : *key_values)
-        {
-            keys_to_process *= vec.size();
-        }
         // TODO: Justify why change to use single thread.
         auto source = std::make_shared<EmbeddedRocksDBSource>(
-            storage, sample_block, key_values, keys_indices, keys_to_process, max_block_size);
+            storage, sample_block, KeyIterator(key_values), max_block_size);
         source->setStorageLimits(query_info.storage_limits);
         pipeline.init(Pipe(std::move(source)));
     }
