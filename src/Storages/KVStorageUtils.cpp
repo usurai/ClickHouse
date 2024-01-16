@@ -478,30 +478,6 @@ std::pair<FieldVectorPtr, bool> getFilterKeys(
     return std::make_pair(res, !matched_keys);
 }
 
-// TODO: Consider encapsulate keys and indices
-void advanceIndices(
-    const std::vector<FieldVector> & keys,
-    std::vector<size_t> & key_indices)
-{
-    for (size_t i = keys.size() - 1; ; --i)
-    {
-        assert(key_indices[i] < keys[i].size());
-        ++key_indices[i];
-        if (key_indices[i] < keys[i].size())
-            return;
-        if (i == 0)
-            return;
-        key_indices[i] = 0;
-    }
-}
-
-bool indicesAtEnd(
-    const std::vector<FieldVector> & keys,
-    const std::vector<size_t> & key_indices)
-{
-    return key_indices[0] == keys[0].size();
-}
-
 std::vector<std::string> serializeKeysToRawString(
     KeyIterator& key_iterator,
     const DataTypes & key_column_types,
