@@ -72,7 +72,6 @@ static RocksDBOptions getOptionsFromConfig(const Poco::Util::AbstractConfigurati
     return options;
 }
 
-// TODO: encapsulate keys and keys_indices
 class EmbeddedRocksDBSource : public ISource
 {
 public:
@@ -144,7 +143,7 @@ private:
     const StorageEmbeddedRocksDB & storage;
 
     /// For key scan
-    std::optional<KeyIterator> key_iterator{std::nullopt};
+    std::optional<KeyIterator> key_iterator = std::nullopt;
 
     /// For full scan
     std::unique_ptr<rocksdb::Iterator> iterator = nullptr;
@@ -570,7 +569,7 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
             return;
         }
 
-        // TODO: Justify why change to use single thread.
+        // Use single thread to do the key scan since currently the key number of key scan method tends to be small, so it's not worthy to spawn threads to scan. If multi-threaded scan is necessary, we can easily create multiple KeyIterator with each containing part of the work.
         auto source = std::make_shared<EmbeddedRocksDBSource>(
             storage, sample_block, KeyIterator(key_values), max_block_size);
         source->setStorageLimits(query_info.storage_limits);

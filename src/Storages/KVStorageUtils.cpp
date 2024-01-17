@@ -88,6 +88,40 @@ struct MultiColumnKeySet {
     std::vector<bool> explicit_empty;
 };
 
+KeyIterator::KeyIterator(FieldVectorsPtr keys_, size_t begin, size_t keys_to_process)
+    : keys{keys_}
+    , key_value_indices(keys->size())
+    , keys_remaining(keys_to_process)
+{
+    std::vector<size_t> size_products(columns(), 1);
+    for (int32_t i = static_cast<int32_t>(keys->size()) - 2; i >= 0; --i)
+        size_products[i] = size_products[i + 1] * keys->at(i + 1).size();
+    const auto total_keys = size_products[0] * keys->at(0).size();
+    if (keys_remaining == 0)
+        keys_remaining = total_keys - begin;
+    assert(begin + keys_to_process < total_keys);
+    for (size_t i = 0; i < columns(); ++i)
+    {
+        key_value_indices[i] = begin / size_products[i];
+        begin -= key_value_indices[i] * size_products[i];
+    }
+}
+
+void KeyIterator::advance()
+{
+    assert(!atEnd());
+    --keys_remaining;
+    for (size_t i = columns() - 1; ; --i)
+    {
+        ++key_value_indices[i];
+        if (key_value_indices[i] < keys->at(i).size())
+            return;
+        if (i == 0)
+            return;
+        key_value_indices[i] = 0;
+    }
+}
+
 namespace
 {
 // returns keys may be filter by condition

@@ -16,29 +16,13 @@ using FieldVectorsPtr = std::shared_ptr<std::vector<FieldVector>>;
 class IDataType;
 using DataTypePtr = std::shared_ptr<const IDataType>;
 
-// TODO: comment & move to .cpp
+/// Represents a set of keys to iterate. The keys can be multi-column, with each column having a number of value. When iterating via 'advance()', combinations of all the key values can be accessed. For example, built from clause 'WHERE k1 in (1,2,3) AND k2 in (4,5) AND k3 = 7', a key iterator will contain all 6 combinations of key 'k1', 'k2' and 'k3', like [1,4,7], [1,5,7] and so on. The user accesses keys via 'keyValueAt()', then calls 'advance()' to move the iterator to the next key combination.
 class KeyIterator {
 public:
     KeyIterator() = delete;
 
-    KeyIterator(FieldVectorsPtr keys_, size_t begin = 0, size_t keys_to_process = 0)
-        : keys{keys_}
-    , key_value_indices(keys->size())
-    , keys_remaining(keys_to_process)
-    {
-        std::vector<size_t> size_products(columns(), 1);
-        for (int32_t i = static_cast<int32_t>(keys->size()) - 2; i >= 0; --i)
-            size_products[i] = size_products[i + 1] * keys->at(i + 1).size();
-        const auto total_keys = size_products[0] * keys->at(0).size();
-        if (keys_remaining == 0)
-            keys_remaining = total_keys - begin;
-        assert(begin + keys_to_process < total_keys);
-        for (size_t i = 0; i < columns(); ++i)
-        {
-            key_value_indices[i] = begin / size_products[i];
-            begin -= key_value_indices[i] * size_products[i];
-        }
-    }
+    /// 'begin' specifies the start combination of keys. 'keys_to_process' limits how many combination to iterated before 'atEnd()' returns true, setting it to 0 means iterating to the last case.
+    KeyIterator(FieldVectorsPtr keys_, size_t begin = 0, size_t keys_to_process = 0);
 
     size_t columns() const { return keys->size(); }
 
@@ -49,21 +33,9 @@ public:
         return keys->at(column)[key_value_indices[column]];
     }
 
-    void advance()
-    {
-        assert(!atEnd());
-        for (size_t i = columns() - 1; ; --i)
-        {
-            ++key_value_indices[i];
-            if (key_value_indices[i] < keys->at(i).size())
-                return;
-            if (i == 0)
-                return;
-            key_value_indices[i] = 0;
-        }
-    }
+    void advance();
 
-    bool atEnd() const { return key_value_indices[0] == keys->at(0).size(); }
+    bool atEnd() const { return keys_remaining == 0; }
 
 private:
     FieldVectorsPtr keys;
@@ -78,7 +50,11 @@ std::pair<FieldVectorPtr, bool> getFilterKeys(
     const std::string & primary_key, const DataTypePtr & primary_key_type, const SelectQueryInfo & query_info, const ContextPtr & context);
 
 /** Multi-column primary key version.
- * TODO: Elaborate
+ * When the primary key is composed of multiple columns, tries to retrieve the key with all the columns having values.
+ * For example, the primary key is (k1, k2). For 'WHERE k1 IN (1,2,3) AND k2 = 5', returns [[1,2,3], [5]]. The caller can use it to scan all 3 combination of keys.
+ * For 'WHERE k1 IN (1,2,3) OR k2 = 5', empty result is returned since no explicit key combination is specified.
+ * Note that the implementation doesn't support multiple combinations with OR, like 'WHERE (k1 = 1 AND k2 = 2) OR (k1 in (4,5) AND k2 in (2,4))', since deduplicate between the combinations will complicates the implementation.
+ * Also, empty result might be returned with 'matched_key' set to true, for the case that the clause explicitly ask for empty key, like 'WHERE k1 IN (1,2) AND k1 = 5'.
  */
 std::pair<FieldVectorsPtr, bool> getFilterKeys(
     const Names & primary_key, const DataTypes & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context);
@@ -105,7 +81,6 @@ void fillColumns(const S & slice, const std::vector<size_t> & pos, const Block &
     }
 }
 
-// TODO: comment
 std::vector<std::string> serializeKeysToRawString(
     KeyIterator& key_iterator,
     const DataTypes & key_column_types,
