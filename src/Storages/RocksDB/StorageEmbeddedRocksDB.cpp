@@ -647,19 +647,35 @@ std::vector<rocksdb::Status> StorageEmbeddedRocksDB::multiGet(const std::vector<
     return rocksdb_ptr->MultiGet(rocksdb::ReadOptions(), slices_keys, &values);
 }
 
-// TODO: multi-col pk
 Chunk StorageEmbeddedRocksDB::getByKeys(
     const ColumnsWithTypeAndName & keys,
     PaddedPODArray<UInt8> & null_map,
     const Names &) const
 {
-    if (keys.size() != 1)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "StorageEmbeddedRocksDB supports only one key, got: {}", keys.size());
+    if (keys.size() != primary_key.size())
+        throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Key column number mismatch, should be {}, is {}.", primary_key.size(), keys.size());
+    for (size_t i = 0; i < keys.size(); ++i)
+    {
+        if (keys[i].name != primary_key[i])
+            throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Primary key name mismatch: {} vs {}.", primary_key[i], keys[i].name);
+        if (!keys[i].type->equals(*primary_key_types[i]))
+            throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Primary key type mismatch: {} vs {}.", primary_key_types[i]->getName(), keys[i].type->getName());
+    }
 
-    auto raw_keys = serializeKeysToRawString(keys[0]);
-
-    if (raw_keys.size() != keys[0].column->size())
-        throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Assertion failed: {} != {}", raw_keys.size(), keys[0].column->size());
+    std::vector<std::string> raw_keys;
+    raw_keys.reserve(keys[0].column->size());
+    for (size_t i = 0; i < keys[0].column->size(); ++i)
+    {
+        std::string & serialized_key = raw_keys.emplace_back();
+        WriteBufferFromString wb(serialized_key);
+        for (size_t col = 0; col < keys.size(); ++col)
+        {
+            Field field;
+            keys[col].column->get(i, field);
+            keys[col].type->getDefaultSerialization()->serializeBinary(field, wb, {});
+        }
+        wb.finalize();
+    }
 
     return getBySerializedKeys(raw_keys, &null_map);
 }
