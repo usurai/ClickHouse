@@ -51,11 +51,11 @@ std::pair<FieldVectorPtr, bool> getFilterKeys(
 
 /** Multi-column primary key version.
  * When the primary key is composed of multiple columns, tries to retrieve the key with all the columns having values, returns the pair {founded key values, need to all scan}.
- * For example, the primary key is (k1, k2).
+ * For example, the primary key is (k1 Int32, k2 Int32).
  * For 'WHERE k1 IN (1,2,3) AND k2 = 5', returns {[[1,2,3], [5]], false}. The caller can use it to scan all 3 combination of keys.
  * For 'WHERE k1 IN (1,2,3) OR k2 = 5', empty result is returned since no explicit key combination is specified. The caller might want to do full scan.
  * Note that the implementation doesn't support multiple combinations with OR, like 'WHERE (k1 = 1 AND k2 = 2) OR (k1 in (4,5) AND k2 in (2,4))', since deduplication between the combinations will complicates the implementation.
- * Also, empty result might be returned with 'all_scan' set to true, for the case that the clause explicitly ask for empty key, like 'WHERE k1 IN (1,2) AND k1 = 5'.
+ * Also, empty result might be returned with 'all_scan' set to true, for the clause that explicitly asks for empty key, like 'WHERE k1 IN (1,2) AND k1 = 5'.
  */
 std::pair<FieldVectorsPtr, bool> getFilterKeys(
     const Names & primary_key, const DataTypes & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context);
