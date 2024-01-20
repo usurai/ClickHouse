@@ -488,9 +488,9 @@ std::pair<FieldVectorsPtr, bool> getFilterKeys(
     for (size_t i = 0; i < primary_key.size(); ++i)
     {
         if (res.explicit_empty[i])
-            return {nullptr, true};
-        if (res.key_values[i].empty())
             return {nullptr, false};
+        if (res.key_values[i].empty())
+            return {nullptr, true};
     }
     auto key_values = std::make_shared<std::vector<FieldVector>>();
     key_values->reserve(primary_key.size());
