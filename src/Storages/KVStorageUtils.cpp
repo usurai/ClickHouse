@@ -32,17 +32,17 @@ struct MultiColumnKeySet {
 
     size_t columns() const { return key_values.size(); }
 
-    size_t filled_columns() const {
+    size_t filledColumns() const {
         size_t filled{0};
         for (size_t i = 0; i < columns(); ++i)
-        {
             if (!key_values[i].empty() || explicit_empty[i])
                 ++filled;
-        }
         return filled;
     }
 
-    // TODO: comment, like this would leave rhs as incomplete state
+    // For each column in this, if the column is empty, move rhs's corresponding column to this.
+    // Otherwise, make the column the intersection between this and rhs.
+    // If this column or rhs's column is explicit_empty, make this column explicit empty.
     void intersectOrAdd(MultiColumnKeySet& rhs)
     {
         assert(rhs.columns() == columns());
@@ -99,7 +99,7 @@ KeyIterator::KeyIterator(FieldVectorsPtr keys_, size_t begin, size_t keys_to_pro
     const auto total_keys = size_products[0] * keys->at(0).size();
     if (keys_remaining == 0)
         keys_remaining = total_keys - begin;
-    assert(begin + keys_to_process < total_keys);
+    assert(begin + keys_remaining <= total_keys);
     for (size_t i = 0; i < columns(); ++i)
     {
         key_value_indices[i] = begin / size_products[i];
@@ -227,7 +227,7 @@ bool traverseASTFilter(
 }
 
 bool traverseDAGFilter(
-    const std::unordered_map<std::string, size_t>& primary_key_pos, const std::vector<DataTypePtr>& primary_key_types, const ActionsDAG::Node * elem, const ContextPtr & context, MultiColumnKeySet & res) {
+    const std::unordered_map<std::string, size_t>& primary_key_pos, const DataTypes & primary_key_types, const ActionsDAG::Node * elem, const ContextPtr & context, MultiColumnKeySet & res) {
     if (elem->type == ActionsDAG::ActionType::ALIAS)
         return traverseDAGFilter(primary_key_pos, primary_key_types, elem->children.at(0), context, res);
 
@@ -252,26 +252,37 @@ bool traverseDAGFilter(
     }
     else if (func_name == "or")
     {
+        // TODO: Support combining multiple predicates with all key columns specified connected by OR.
+        // Like 'WHERE (k1 IN (1,2,3) AND k2 = 5) OR (k1 = 6 AND k2 IN (2, 7))'.
+        // An efficient method to deduplicate between predicates is needed.
         for (const auto * child : elem->children)
         {
             MultiColumnKeySet partial_res(primary_key_columns);
             if (!traverseDAGFilter(primary_key_pos, primary_key_types, child, context, partial_res))
                 return false;
 
-            if (partial_res.filled_columns() < primary_key_columns) {
+            if (partial_res.filledColumns() != 1)
                 return false;
-            }
 
-            if (res.filled_columns()) {
-                // TODO: elaborate. Support combining multiple OR.
-                if (primary_key_columns > 1) {
-                    return false;
+            std::optional<size_t> res_filled_column = std::nullopt;
+            for (size_t i = 0; i < primary_key_columns; ++i)
+                if (!res.key_values[i].empty() || res.explicit_empty[i])
+                {
+                    if (res_filled_column.has_value())
+                        return false;
+                    res_filled_column = i;
                 }
-                if (!partial_res.explicit_empty[0])
-                    res.addField(0, partial_res.key_values[0]);
-            } else {
+
+            if (!res_filled_column.has_value())
+            {
                 res = std::move(partial_res);
+                continue;
             }
+            const auto filled_column = res_filled_column.value();
+            if (partial_res.key_values[filled_column].empty() && !partial_res.explicit_empty[filled_column])
+                return false;
+            if (!partial_res.key_values[filled_column].empty())
+                res.addField(filled_column, partial_res.key_values[filled_column]);
         }
         return true;
     }
@@ -351,107 +362,6 @@ bool traverseDAGFilter(
     return false;
 }
 
-
-bool traverseDAGFilter(
-    const std::string & primary_key, const DataTypePtr & primary_key_type, const ActionsDAG::Node * elem, const ContextPtr & context, FieldVectorPtr & res)
-{
-    if (elem->type == ActionsDAG::ActionType::ALIAS)
-        return traverseDAGFilter(primary_key, primary_key_type, elem->children.at(0), context, res);
-
-    if (elem->type != ActionsDAG::ActionType::FUNCTION)
-        return false;
-
-    auto func_name = elem->function_base->getName();
-
-    if (func_name == "and")
-    {
-        // one child has the key filter condition is ok
-        for (const auto * child : elem->children)
-            if (traverseDAGFilter(primary_key, primary_key_type, child, context, res))
-                return true;
-        return false;
-    }
-    else if (func_name == "or")
-    {
-        // make sure every child has the key filter condition
-        for (const auto * child : elem->children)
-            if (!traverseDAGFilter(primary_key, primary_key_type, child, context, res))
-                return false;
-        return true;
-    }
-    else if (func_name == "equals" || func_name == "in")
-    {
-        if (elem->children.size() != 2)
-            return false;
-
-        if (func_name == "in")
-        {
-            const auto * key = elem->children.at(0);
-            while (key->type == ActionsDAG::ActionType::ALIAS)
-                key = key->children.at(0);
-
-            if (key->type != ActionsDAG::ActionType::INPUT)
-                return false;
-
-            if (key->result_name != primary_key)
-                return false;
-
-            const auto * value = elem->children.at(1);
-            if (value->type != ActionsDAG::ActionType::COLUMN)
-                return false;
-
-            const IColumn * value_col = value->column.get();
-            if (const auto * col_const = typeid_cast<const ColumnConst *>(value_col))
-                value_col = &col_const->getDataColumn();
-
-            const auto * col_set = typeid_cast<const ColumnSet *>(value_col);
-            if (!col_set)
-                return false;
-
-            auto future_set = col_set->getData();
-            future_set->buildOrderedSetInplace(context);
-
-            auto set = future_set->get();
-            if (!set)
-                return false;
-
-            if (!set->hasExplicitSetElements())
-                return false;
-
-            set->checkColumnsNumber(1);
-            const auto & set_column = *set->getSetElements()[0];
-
-            if (set_column.getDataType() != primary_key_type->getTypeId())
-                return false;
-
-            for (size_t row = 0; row < set_column.size(); ++row)
-                res->push_back(set_column[row]);
-            return true;
-        }
-        else
-        {
-            const auto * key = elem->children.at(0);
-            while (key->type == ActionsDAG::ActionType::ALIAS)
-                key = key->children.at(0);
-
-            if (key->type != ActionsDAG::ActionType::INPUT)
-                return false;
-
-            if (key->result_name != primary_key)
-                return false;
-
-            const auto * value = elem->children.at(1);
-            if (value->type != ActionsDAG::ActionType::COLUMN)
-                return false;
-
-            auto converted_field = convertFieldToType((*value->column)[0], *primary_key_type);
-            if (!converted_field.isNull())
-                res->push_back(converted_field);
-            return true;
-        }
-    }
-    return false;
-}
 }
 
 
@@ -470,18 +380,6 @@ std::pair<FieldVectorsPtr, bool> getFilterKeys(
 
     MultiColumnKeySet res(primary_key.size());
     auto matched_keys = traverseDAGFilter(primary_key_pos, primary_key_types, predicate, context, res);
-
-    // TODO: Remove this after tests.
-    std::cout << "keys:\n";
-    for (auto & vec : res.key_values) {
-        std::cout << vec.size() << ':';
-        for (const auto & f : vec)
-            std::cout << toString(f) << ' ';
-        std::cout << '\n';
-    }
-    std::cout << '\n';
-    std::cout << "all_scan:" << !matched_keys << '\n';
-
     if (!matched_keys)
         return {nullptr, true};
 
@@ -496,7 +394,6 @@ std::pair<FieldVectorsPtr, bool> getFilterKeys(
     key_values->reserve(primary_key.size());
     for (auto & key_value : res.key_values)
         key_values->emplace_back(key_value.begin(), key_value.end());
-
     return {key_values, false};
 }
 
