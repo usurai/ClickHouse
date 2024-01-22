@@ -26,13 +26,17 @@ namespace ErrorCodes
     extern const int LOGICAL_ERROR;
 }
 
-struct MultiColumnKeySet {
+struct MultiColumnKeySet
+{
     explicit MultiColumnKeySet(size_t columns)
-        : key_values(columns), explicit_empty(columns) {}
+        : key_values(columns), explicit_empty(columns)
+    {
+    }
 
     size_t columns() const { return key_values.size(); }
 
-    size_t filledColumns() const {
+    size_t filledColumns() const
+    {
         size_t filled{0};
         for (size_t i = 0; i < columns(); ++i)
             if (!key_values[i].empty() || explicit_empty[i])
@@ -58,9 +62,10 @@ struct MultiColumnKeySet {
                 continue;
 
             auto & key_value = key_values[i];
-            if (key_value.empty()) {
+            if (key_value.empty())
                 key_value = std::move(rhs.key_values[i]);
-            } else if (!rhs.key_values[i].empty()) {
+            else if (!rhs.key_values[i].empty())
+            {
                 if (key_value.size() > rhs.key_values[i].size())
                     std::swap(key_value, rhs.key_values[i]);
                 for (auto it = key_value.begin(); it != key_value.end();)
@@ -126,7 +131,7 @@ namespace
 {
 // returns keys may be filter by condition
 bool traverseASTFilter(
-    const std::string & primary_key, const DataTypePtr & primary_key_type, const ASTPtr & elem, const PreparedSetsPtr & prepared_sets, const ContextPtr & context, FieldVectorPtr & res)
+    const std::string & primary_key,const DataTypePtr & primary_key_type, const ASTPtr & elem, const PreparedSetsPtr & prepared_sets, const ContextPtr & context, FieldVectorPtr & res)
 {
     const auto * function = elem->as<ASTFunction>();
     if (!function)
@@ -227,7 +232,11 @@ bool traverseASTFilter(
 }
 
 bool traverseDAGFilter(
-    const std::unordered_map<std::string, size_t>& primary_key_pos, const DataTypes & primary_key_types, const ActionsDAG::Node * elem, const ContextPtr & context, MultiColumnKeySet & res) {
+    const std::unordered_map<std::string, size_t>& primary_key_pos,
+    const DataTypes & primary_key_types,
+    const ActionsDAG::Node * elem,
+    const ContextPtr & context, MultiColumnKeySet & res)
+{
     if (elem->type == ActionsDAG::ActionType::ALIAS)
         return traverseDAGFilter(primary_key_pos, primary_key_types, elem->children.at(0), context, res);
 

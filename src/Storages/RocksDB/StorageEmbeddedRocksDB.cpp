@@ -181,19 +181,22 @@ StorageEmbeddedRocksDB::StorageEmbeddedRocksDB(const StorageID & table_id_,
     const auto sample_block = getInMemoryMetadataPtr()->getSampleBlock();
     std::vector<bool> is_pk(sample_block.columns());
     primary_key_pos.reserve(primary_key.size());
-    for (const auto& key_name : primary_key) {
+    for (const auto& key_name : primary_key)
+    {
         primary_key_pos.push_back(sample_block.getPositionByName(key_name));
         is_pk[primary_key_pos.back()] = true;
     }
 
     value_column_pos.reserve(is_pk.size() - primary_key_pos.size());
-    for (size_t i = 0; i < is_pk.size(); ++i) {
+    for (size_t i = 0; i < is_pk.size(); ++i)
+    {
         if (!is_pk[i])
             value_column_pos.push_back(i);
     }
 
     primary_key_types.reserve(primary_key.size());
-    for (const auto pos : primary_key_pos) {
+    for (const auto pos : primary_key_pos)
+    {
         auto & column_type_name = sample_block.getByPosition(pos);
         primary_key_types.push_back(column_type_name.type);
     }
@@ -261,7 +264,8 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
             std::vector<DataTypePtr> types;
             columns.reserve(primary_key_pos.size());
             types.reserve(primary_key_pos.size());
-            for (const auto pos : primary_key_pos) {
+            for (const auto pos : primary_key_pos)
+            {
                 auto & column_type_name = block.getByPosition(pos);
                 columns.push_back(column_type_name.column);
                 types.push_back(column_type_name.type);
@@ -274,7 +278,8 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
             {
                 wb_key.restart();
 
-                for (size_t j = 0; j < columns.size(); ++j) {
+                for (size_t j = 0; j < columns.size(); ++j)
+                {
                     types[j]->getDefaultSerialization()->serializeBinary(*columns[j], i, wb_key, {});
                 }
                 auto status = batch.Delete(wb_key.str());
@@ -291,7 +296,8 @@ void StorageEmbeddedRocksDB::mutate(const MutationCommands & commands, ContextPt
     }
 
     assert(commands.front().type == MutationCommand::Type::UPDATE);
-    for (const auto& key : primary_key) {
+    for (const auto& key : primary_key)
+    {
         if (commands.front().column_to_update_expression.contains(key))
             throw Exception(ErrorCodes::BAD_ARGUMENTS, "Primary key cannot be updated (cannot update column {})", primary_key[0]);
     }
@@ -569,7 +575,9 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
             return;
         }
 
-        // Use single thread to do the key scan since currently the key number of key scan method tends to be small, so it's not worthy to spawn threads to scan. If multi-threaded scan is necessary, we can easily create multiple KeyIterator with each containing part of the work.
+        // Use single thread to do the key scan since currently the key number of key scan method tends to be small, so it's not worthy to
+        // spawn threads to scan. If multi-threaded scan is necessary, we can easily create multiple KeyIterator with each containing part
+        // of the work.
         auto source = std::make_shared<EmbeddedRocksDBSource>(
             storage, sample_block, KeyIterator(key_values), max_block_size);
         source->setStorageLimits(query_info.storage_limits);
@@ -624,10 +632,10 @@ static StoragePtr create(const StorageFactory::Arguments & args)
 
     metadata.primary_key = KeyDescription::getKeyFromAST(args.storage_def->primary_key->ptr(), metadata.columns, args.getContext());
     auto primary_key_names = metadata.getColumnsRequiredForPrimaryKey();
-    if (primary_key_names.empty()) {
+    if (primary_key_names.empty())
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "StorageEmbeddedRocksDB must require at least one column in primary key");
-    }
-    return std::make_shared<StorageEmbeddedRocksDB>(args.table_id, args.relative_data_path, metadata, args.attach, args.getContext(), std::move(primary_key_names), ttl, std::move(rocksdb_dir), read_only);
+    return std::make_shared<StorageEmbeddedRocksDB>(args.table_id, args.relative_data_path, metadata, args.attach, args.getContext(),
+            std::move(primary_key_names), ttl, std::move(rocksdb_dir), read_only);
 }
 
 std::shared_ptr<rocksdb::Statistics> StorageEmbeddedRocksDB::getRocksDBStatistics() const
@@ -652,13 +660,15 @@ Chunk StorageEmbeddedRocksDB::getByKeys(
     const Names &) const
 {
     if (keys.size() != primary_key.size())
-        throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Key column number mismatch, should be {}, is {}.", primary_key.size(), keys.size());
+        throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Key column number mismatch, should be {}, is {}.",
+                primary_key.size(), keys.size());
     for (size_t i = 0; i < keys.size(); ++i)
     {
         if (keys[i].name != primary_key[i])
             throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Primary key name mismatch: {} vs {}.", primary_key[i], keys[i].name);
         if (!keys[i].type->equals(*primary_key_types[i]))
-            throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Primary key type mismatch: {} vs {}.", primary_key_types[i]->getName(), keys[i].type->getName());
+            throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Primary key type mismatch: {} vs {}.",
+                    primary_key_types[i]->getName(), keys[i].type->getName());
     }
 
     std::vector<std::string> raw_keys;
