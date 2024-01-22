@@ -663,13 +663,9 @@ Chunk StorageEmbeddedRocksDB::getByKeys(
         throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Key column number mismatch, should be {}, is {}.",
                 primary_key.size(), keys.size());
     for (size_t i = 0; i < keys.size(); ++i)
-    {
-        if (keys[i].name != primary_key[i])
-            throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Primary key name mismatch: {} vs {}.", primary_key[i], keys[i].name);
         if (!keys[i].type->equals(*primary_key_types[i]))
             throw DB::Exception(ErrorCodes::LOGICAL_ERROR, "Primary key type mismatch: {} vs {}.",
                     primary_key_types[i]->getName(), keys[i].type->getName());
-    }
 
     std::vector<std::string> raw_keys;
     raw_keys.reserve(keys[0].column->size());
