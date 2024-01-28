@@ -83,8 +83,8 @@ struct MultiColumnKeySet
 
     void addField(size_t column, FieldSet& field_set)
     {
-        for (auto & field : field_set)
-            key_values[column].insert(std::move(field));
+        for (const auto & field : field_set)
+            key_values[column].insert(field);
         explicit_empty[column] = false;
     }
 

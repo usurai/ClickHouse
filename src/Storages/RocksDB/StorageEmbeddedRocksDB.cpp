@@ -157,7 +157,7 @@ StorageEmbeddedRocksDB::StorageEmbeddedRocksDB(const StorageID & table_id_,
         const StorageInMemoryMetadata & metadata_,
         bool attach,
         ContextPtr context_,
-        const Names primary_key_,
+        Names primary_key_,
         Int32 ttl_,
         String rocksdb_dir_,
         bool read_only_)
@@ -197,7 +197,7 @@ StorageEmbeddedRocksDB::StorageEmbeddedRocksDB(const StorageID & table_id_,
     primary_key_types.reserve(primary_key.size());
     for (const auto pos : primary_key_pos)
     {
-        auto & column_type_name = sample_block.getByPosition(pos);
+        const auto & column_type_name = sample_block.getByPosition(pos);
         primary_key_types.push_back(column_type_name.type);
     }
 
@@ -587,12 +587,7 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
 
 void ReadFromEmbeddedRocksDB::applyFilters()
 {
-    const auto & sample_block = getOutputStream().header;
-    std::vector<DataTypePtr> types;
-    types.reserve(storage.primary_key.size());
-    for (size_t i = 0; i < storage.primary_key.size(); ++i)
-        types.push_back(sample_block.getByName(storage.primary_key[i]).type);
-    std::tie(key_values, all_scan) = getFilterKeys(storage.primary_key, types, filter_nodes, context);
+    std::tie(key_values, all_scan) = getFilterKeys(storage.primary_key, storage.getPrimaryKeyTypes(), filter_nodes, context);
 }
 
 SinkToStoragePtr StorageEmbeddedRocksDB::write(
@@ -673,11 +668,11 @@ Chunk StorageEmbeddedRocksDB::getByKeys(
     {
         std::string & serialized_key = raw_keys.emplace_back();
         WriteBufferFromString wb(serialized_key);
-        for (size_t col = 0; col < keys.size(); ++col)
+        for (const auto& key : keys)
         {
             Field field;
-            keys[col].column->get(i, field);
-            keys[col].type->getDefaultSerialization()->serializeBinary(field, wb, {});
+            key.column->get(i, field);
+            key.type->getDefaultSerialization()->serializeBinary(field, wb, {});
         }
         wb.finalize();
     }
