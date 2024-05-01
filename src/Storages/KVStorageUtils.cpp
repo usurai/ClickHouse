@@ -373,12 +373,11 @@ bool traverseDAGFilter(
 
 }
 
-
 std::pair<FieldVectorsPtr, bool> getFilterKeys(
-    const Names & primary_key, const DataTypes & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context)
+    const Names & primary_key, const DataTypes & primary_key_types, const ActionsDAGPtr & filter_actions_dag, const ContextPtr & context)
 {
-    if (filter_nodes.nodes.empty())
-        return {nullptr, true};
+    if (!filter_actions_dag)
+        return {{}, true};
 
     auto filter_actions_dag = ActionsDAG::buildFilterActionsDAG(filter_nodes.nodes);
     const auto * predicate = filter_actions_dag->getOutputs().at(0);

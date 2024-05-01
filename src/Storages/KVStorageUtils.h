@@ -67,7 +67,7 @@ std::pair<FieldVectorPtr, bool> getFilterKeys(
  * 'WHERE k1 IN (1,2) AND k1 = 5'.
  */
 std::pair<FieldVectorsPtr, bool> getFilterKeys(
-    const Names & primary_key, const DataTypes & primary_key_types, const ActionDAGNodes & filter_nodes, const ContextPtr & context);
+    const Names & primary_key, const DataTypes & primary_key_types, const ActionsDAGPtr & filter_actions_dag, const ContextPtr & context);
 
 template <typename K, typename V>
 void fillColumns(const K & key, const V & value, size_t key_pos, const Block & header, MutableColumns & columns)
