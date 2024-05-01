@@ -379,7 +379,6 @@ std::pair<FieldVectorsPtr, bool> getFilterKeys(
     if (!filter_actions_dag)
         return {{}, true};
 
-    auto filter_actions_dag = ActionsDAG::buildFilterActionsDAG(filter_nodes.nodes);
     const auto * predicate = filter_actions_dag->getOutputs().at(0);
 
     std::unordered_map<String, size_t> primary_key_pos;
