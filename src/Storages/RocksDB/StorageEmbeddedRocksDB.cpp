@@ -579,9 +579,7 @@ void ReadFromEmbeddedRocksDB::initializePipeline(QueryPipelineBuilder & pipeline
 void ReadFromEmbeddedRocksDB::applyFilters(ActionDAGNodes added_filter_nodes)
 {
     filter_actions_dag = ActionsDAG::buildFilterActionsDAG(added_filter_nodes.nodes);
-    const auto & sample_block = getOutputStream().header;
-    auto primary_key_data_type = sample_block.getByName(storage.primary_key).type;
-    std::tie(keys, all_scan) = getFilterKeys(storage.primary_key, primary_key_data_type, filter_actions_dag, context);
+    std::tie(key_values, all_scan) = getFilterKeys(storage.primary_key, storage.getPrimaryKeyTypes(), filter_actions_dag, context);
 }
 
 SinkToStoragePtr StorageEmbeddedRocksDB::write(
@@ -621,11 +619,10 @@ static StoragePtr create(const StorageFactory::Arguments & args)
 
     metadata.primary_key = KeyDescription::getKeyFromAST(args.storage_def->primary_key->ptr(), metadata.columns, args.getContext());
     auto primary_key_names = metadata.getColumnsRequiredForPrimaryKey();
-    if (primary_key_names.size() != 1)
-    {
-        throw Exception(ErrorCodes::BAD_ARGUMENTS, "StorageEmbeddedRocksDB must require one column in primary key");
-    }
-    return std::make_shared<StorageEmbeddedRocksDB>(args.table_id, args.relative_data_path, metadata, args.mode, args.getContext(), primary_key_names[0], ttl, std::move(rocksdb_dir), read_only);
+    if (primary_key_names.empty())
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "StorageEmbeddedRocksDB must require at least one column in primary key");
+    return std::make_shared<StorageEmbeddedRocksDB>(args.table_id, args.relative_data_path, metadata, args.mode, args.getContext(),
+        std::move(primary_key_names), ttl, std::move(rocksdb_dir), read_only);
 }
 
 std::shared_ptr<rocksdb::Statistics> StorageEmbeddedRocksDB::getRocksDBStatistics() const
